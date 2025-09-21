@@ -15,11 +15,12 @@ class AllocatorTest extends AnyFlatSpec {
       var allocations: Seq[String] = Seq.empty
       var shutdowns: Seq[String]   = Seq.empty
 
-      override def onInit[A: ClassTag](resource: A): IO[Unit] = IO {
-        allocations = allocations :+ resource.toString
+      override def onInit[A: ClassTag](resource: A) = IO {
+        allocations :+= resource.toString
       }
-      override def onShutdown[A: ClassTag](resource: A): IO[Unit] = IO {
-        shutdowns = shutdowns :+ resource.toString
+
+      override def onShutdown[A: ClassTag](resource: A) = IO {
+        shutdowns :+= resource.toString
       }
     }
 
@@ -37,12 +38,12 @@ class AllocatorTest extends AnyFlatSpec {
     class TestDependencies(using AllocatorIO) {
 
       // Allocate resources using the Allocator syntax
-      lazy val testResourceA: String = cedi {
+      lazy val testResourceA: String = provide {
         Resource.pure("resourceA")
       }
 
       // Allocate resources that depend on other resources using direct method
-      lazy val testResourceB: String = cedi {
+      lazy val testResourceB: String = provide {
         Resource.pure(s"resourceB, depends on $testResourceA")
       }
 

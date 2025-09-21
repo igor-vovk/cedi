@@ -28,8 +28,11 @@ object Allocator {
    * When using this method you must call [[shutdownAll]] manually after you finished working with
    * dependencies.
    */
-  def unsafeCreate(runtime: IORuntime): Allocator[IO] =
-    create[IO]().allocated.unsafeRunSync()(runtime)._1
+  def unsafeCreate(runtime: IORuntime): Allocator[IO] = {
+    val (alloc, _) = create[IO]().allocated.unsafeRunSync()(using runtime)
+
+    alloc
+  }
 
   def apply[F[_]: Allocator]: Allocator[F] =
     implicitly[Allocator[F]]

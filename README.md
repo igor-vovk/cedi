@@ -22,7 +22,7 @@ The suggested approach with this library is to:
 1. Define a `Dependencies` class that holds all the dependencies.
 2. Instantiate an `Allocator` and pass it as a parameter to the `Dependencies` object. The `Allocator` is responsible
    for managing the lifecycle of resources and ensures that they are shut down in the right order.
-3. Use a `cedi` method to instantiate dependencies that return a `Resource[F, A]` or `F[A]`. The method ensures that the
+3. Use a `provide` method to instantiate dependencies that return a `Resource[F, A]` or `F[A]`. The method ensures that the
    resources are properly managed and shut down when the application finishes.
 4. Use `lazy val` to instantiate dependencies only once and only when they are accessed (if you need to instantiate
    dependencies multiple times, use `def` instead of `lazy val`).
@@ -44,8 +44,8 @@ object Dependencies {
 
 class Dependencies(using AllocatorIO) {
   // Suppose you need to instantiate a class, method constructor of which returns a Resource[F, A]
-  // Then use the `cedi` method to allocate such resources:
-  lazy val http4sClient: Client[IO] = cedi {
+  // Then use the `provide` method to allocate such resources:
+  lazy val http4sClient: Client[IO] = provide {
     // `build` method returns a Resource[IO, Client[IO]]
     EmberClientBuilder.default[IO].build
   }
@@ -54,7 +54,7 @@ class Dependencies(using AllocatorIO) {
   lazy val myClass: MyClass = new MyClass(http4sClient)
 
   // It also supports dependencies that return an IO[A] or any other F[A]
-  lazy val myDependency: MyDependency = cedi {
+  lazy val myDependency: MyDependency = provide {
     IO(new MyDependency(http4sClient))
   }
 
@@ -109,7 +109,7 @@ Allocator.create[IO]().withListener(new LoggingAllocationListener[IO])
 
 You can have multiple dependencies objects and combine them together. In this case, you can either reuse the same
 `Allocator` object or create a new one for each dependency object, but wrap their instantiation
-in `cedi { ... }` so that they are shut down in the right order:
+in `provide { ... }` so that they are shut down in the right order:
 
 Example reusing the same `Allocator` object:
 
@@ -118,7 +118,7 @@ import me.ivovk.cedi.syntax.*
 
 // AWS - specific dependencies
 class AwsDependencies(using AllocatorIO) {
-  lazy val s3Client: S3Client = cedi {
+  lazy val s3Client: S3Client = provide {
     S3ClientBuilder.default.build
   }
 }
@@ -132,7 +132,7 @@ object Dependencies {
 class Dependencies(using AllocatorIO) {
   val aws = new AwsDependencies
 
-  lazy val http4sClient: Client[IO] = cedi {
+  lazy val http4sClient: Client[IO] = provide {
     EmberClientBuilder.default[IO].build
   }
 }
@@ -157,7 +157,7 @@ object AwsDependencies {
 }
 
 class AwsDependencies(using AllocatorIO) {
-  lazy val s3Client: S3Client = cedi {
+  lazy val s3Client: S3Client = provide {
     S3ClientBuilder.default.build
   }
 }
@@ -169,11 +169,11 @@ object Dependencies {
 }
 
 class Dependencies(using AllocatorIO) {
-  lazy val aws = cedi {
+  lazy val aws = provide {
     AwsDependencies.create()
   }
 
-  lazy val http4sClient: Client[IO] = cedi {
+  lazy val http4sClient: Client[IO] = provide {
     EmberClientBuilder.default[IO].build
   }
 }

@@ -8,8 +8,10 @@ object syntax {
   val Allocator: me.ivovk.cedi.Allocator.type = me.ivovk.cedi.Allocator
   type AllocatorIO = me.ivovk.cedi.Allocator[IO]
 
-  // Both `allocate` and `cedi` can be used
+  // `allocate`, `provide` or `cedi` can be used interchangeably depending on your preference
   def allocate: AllocateOps = new AllocateOps
+
+  def provide: AllocateOps = new AllocateOps
 
   def cedi: AllocateOps = new AllocateOps
 
