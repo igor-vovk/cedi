@@ -17,23 +17,23 @@ The traditional approach to dependency injection with cats-effect is to build a 
 dependencies together. This approach is not very scalable and can become quite messy as the number of dependencies
 grows.
 
-The suggested approach with this library would be:
+The suggested approach with this library is to:
 
 1. Define a `Dependencies` class that holds all the dependencies.
-2. Instantiate an `Allocator` and pass it to the `Dependencies` object. The `Allocator` is responsible for
-   managing the lifecycle of resources and ensuring that they are shut down in the right order.
-3. Use an `allocate` method to instantiate dependencies that return a `Resource[F, A]` or `F[A]`. This method will
-   ensure that the resource is properly managed and shut down when the application finishes.
-4. Use `lazy val` to ensure that dependencies are instantiated only once (if you need
-   to instantiate a dependency multiple times, just use `def` instead of `lazy val`) and only when they are accessed.
+2. Instantiate an `Allocator` and pass it as a parameter to the `Dependencies` object. The `Allocator` is responsible
+   for managing the lifecycle of resources and ensures that they are shut down in the right order.
+3. Use a `cedi` method to instantiate dependencies that return a `Resource[F, A]` or `F[A]`. The method ensures that the
+   resources are properly managed and shut down when the application finishes.
+4. Use `lazy val` to instantiate dependencies only once and only when they are accessed (if you need to instantiate
+   dependencies multiple times, use `def` instead of `lazy val`).
 5. Wrap the `Dependencies` object in a `Resource` so that resources are shut down automatically when the
    application finishes.
-6. Use the `Dependencies` object in your main class extending `IOApp`, ensuring that all dependencies are available and
-   properly managed.
+6. Use the `Dependencies` object in your main class, that extends `IOApp` trait.
 
-Example usage:
+Usage example:
 
 ```scala
+import cats.effect.{IO, Resource}
 import me.ivovk.cedi.syntax.* // Import necessary packages
 
 // create a Dependencies object and class that holds all the dependencies:
@@ -43,9 +43,9 @@ object Dependencies {
 }
 
 class Dependencies(using AllocatorIO) {
-  // Suppose you need to instantiate a class that returns a Resource[F, A]
-  // Then you can use the allocator to allocate the resource
-  lazy val http4sClient: Client[IO] = allocate {
+  // Suppose you need to instantiate a class, method constructor of which returns a Resource[F, A]
+  // Then use the `cedi` method to allocate such resources:
+  lazy val http4sClient: Client[IO] = cedi {
     // `build` method returns a Resource[IO, Client[IO]]
     EmberClientBuilder.default[IO].build
   }
@@ -53,13 +53,14 @@ class Dependencies(using AllocatorIO) {
   // Dependencies that don't need to be shut down can be used directly
   lazy val myClass: MyClass = new MyClass(http4sClient)
 
-  // It also supports dependencies that return an IO
-  lazy val myDependency: MyDependency = allocate {
+  // It also supports dependencies that return an IO[A] or any other F[A]
+  lazy val myDependency: MyDependency = cedi {
     IO(new MyDependency(http4sClient))
   }
 
-  // Dependencies will be shut down in the right order
-  lazy val myServer: Server[IO] = allocate {
+  // Dependencies will be shut down in the right order, so if myDependency depends on http4sClient,
+  // http4sClient will be shut down after myDependency
+  lazy val myServer: Resource[IO, Server[IO]] = {
     EmberServerBuilder.default[IO]
       .withHost(host"0.0.0.0")
       .withPort(port"8080")
@@ -108,7 +109,7 @@ Allocator.create[IO]().withListener(new LoggingAllocationListener[IO])
 
 You can have multiple dependencies objects and combine them together. In this case, you can either reuse the same
 `Allocator` object or create a new one for each dependency object, but wrap their instantiation
-in `allocate { ... }` so that they are shut down in the right order:
+in `cedi { ... }` so that they are shut down in the right order:
 
 Example reusing the same `Allocator` object:
 
@@ -117,7 +118,7 @@ import me.ivovk.cedi.syntax.*
 
 // AWS - specific dependencies
 class AwsDependencies(using AllocatorIO) {
-  lazy val s3Client: S3Client = allocate {
+  lazy val s3Client: S3Client = cedi {
     S3ClientBuilder.default.build
   }
 }
@@ -131,7 +132,7 @@ object Dependencies {
 class Dependencies(using AllocatorIO) {
   val aws = new AwsDependencies
 
-  lazy val http4sClient: Client[IO] = allocate {
+  lazy val http4sClient: Client[IO] = cedi {
     EmberClientBuilder.default[IO].build
   }
 }
@@ -156,7 +157,7 @@ object AwsDependencies {
 }
 
 class AwsDependencies(using AllocatorIO) {
-  lazy val s3Client: S3Client = allocate {
+  lazy val s3Client: S3Client = cedi {
     S3ClientBuilder.default.build
   }
 }
@@ -168,11 +169,11 @@ object Dependencies {
 }
 
 class Dependencies(using AllocatorIO) {
-  lazy val aws = allocate {
+  lazy val aws = cedi {
     AwsDependencies.create()
   }
 
-  lazy val http4sClient: Client[IO] = allocate {
+  lazy val http4sClient: Client[IO] = cedi {
     EmberClientBuilder.default[IO].build
   }
 }
