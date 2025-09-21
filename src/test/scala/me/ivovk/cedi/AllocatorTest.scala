@@ -1,61 +1,76 @@
 package me.ivovk.cedi
 
 import cats.effect.unsafe.implicits.global
-import cats.effect.{IO, Ref, Resource}
+import cats.effect.{IO, Resource}
 import me.ivovk.cedi.syntax.*
 import org.scalatest.flatspec.AnyFlatSpec
+
+import scala.reflect.ClassTag
 
 //noinspection TypeAnnotation
 class AllocatorTest extends AnyFlatSpec {
 
   trait ctx {
+    class CapturingAllocationListener extends AllocationLifecycleListener[IO] {
+      var allocations: Seq[String] = Seq.empty
+      var shutdowns: Seq[String]   = Seq.empty
+
+      override def onInit[A: ClassTag](resource: A): IO[Unit] = IO {
+        allocations = allocations :+ resource.toString
+      }
+      override def onShutdown[A: ClassTag](resource: A): IO[Unit] = IO {
+        shutdowns = shutdowns :+ resource.toString
+      }
+    }
+
     object TestDependencies {
-      def create(): Resource[IO, TestDependencies] =
-        Allocator.create[IO]()
-          .map(_.withListener(new LoggingAllocationListener[IO]))
+      def create(): (Resource[IO, TestDependencies], CapturingAllocationListener) = {
+        val listener = new CapturingAllocationListener
+        val deps     = Allocator.create[IO]()
+          .map(_.withListener(listener))
           .map(TestDependencies(using _))
 
-      val shutdownOrderCapturer: Ref[IO, Seq[String]] = Ref.unsafe(Seq.empty)
+        (deps, listener)
+      }
     }
 
     class TestDependencies(using AllocatorIO) {
 
-      import TestDependencies.*
-
       // Allocate resources using the Allocator syntax
-      lazy val testResourceA: String = allocate {
-        Resource.make(IO("resourceA")) { _ =>
-          shutdownOrderCapturer.update(_ :+ "A").void
-        }
+      lazy val testResourceA: String = cedi {
+        Resource.pure("resourceA")
       }
 
       // Allocate resources that depend on other resources using direct method
-      lazy val testResourceB: String = allocate {
-        Resource.make(IO(s"resourceB, but depends on $testResourceA")) { _ =>
-          shutdownOrderCapturer.update(_ :+ "B").void
-        }
+      lazy val testResourceB: String = cedi {
+        Resource.pure(s"resourceB, depends on $testResourceA")
       }
 
     }
   }
 
   "Allocator" should "allocate a resource" in new ctx {
-    val testDependencies = TestDependencies.create()
-    val testResource     = testDependencies.use { deps =>
-      IO.pure(deps.testResourceA)
-    }.unsafeRunSync()
+    val (testDependencies, listener) = TestDependencies.create()
+
+    val testResource = testDependencies
+      .use(deps => IO.pure(deps.testResourceA))
+      .unsafeRunSync()
 
     assert(testResource == "resourceA")
+
+    assert(listener.allocations == Seq("resourceA"))
+    assert(listener.shutdowns == Seq("resourceA"))
   }
 
   it should "allocate resources in the correct order" in new ctx {
-    val testDependencies = TestDependencies.create()
-    testDependencies.use { deps =>
-      IO.pure(deps.testResourceB)
-    }.unsafeRunSync()
+    val (testDependencies, listener) = TestDependencies.create()
 
-    val resourceShutdownOrder = TestDependencies.shutdownOrderCapturer.get.unsafeRunSync()
-    assert(resourceShutdownOrder == Seq("B", "A"))
+    testDependencies
+      .use(deps => IO.pure(deps.testResourceB))
+      .unsafeRunSync()
+
+    assert(listener.allocations == Seq("resourceA", "resourceB, depends on resourceA"))
+    assert(listener.shutdowns == Seq("resourceB, depends on resourceA", "resourceA"))
   }
 
 }
