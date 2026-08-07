@@ -1,187 +1,191 @@
-# cedi [tsedi] – Cats-Effect Dependency Injection library
+# cedi [tsedi]
 
-A tiny library that makes dependency injection with [cats-effect](https://github.com/typelevel/cats-effect) simple.
-This is a follow-up of
-an [article](https://medium.com/@ivovk/dependency-injection-with-cats-effect-resource-monad-ad7cd47b977) I wrote about
-the topic.
+[![Maven Central](https://img.shields.io/maven-central/v/me.ivovk/cedi_3?style=flat-square&color=green)](https://central.sonatype.com/artifact/me.ivovk/cedi_3)
 
-Usually, what you want from a dependency injection library is to be able to:
+**Lifecycle-safe application wiring for Cats Effect.**
 
-- Define dependencies in a single place
-- Instantiate dependencies only when they are needed
-- Ensure that dependencies are shut down in the right order when the application finishes
-- Instantiate dependencies only once, even if they are accessed multiple times
-- Support modularization of dependencies, so that you can have multiple dependency objects and combine them together
+As an application grows, wiring every dependency through one large `Resource` for-comprehension becomes difficult to
+read, change, and split into modules. cedi lets you describe the same dependency graph with ordinary Scala classes and
+lazy values while preserving Cats Effect resource lifecycles.
 
-The traditional approach to dependency injection with cats-effect is to build a single for-comprehension that wires all
-dependencies together. This approach is not very scalable and can become quite messy as the number of dependencies
-grows.
+- Dependencies are initialized only when first accessed
+- A dependency declared as a `lazy val` is initialized once
+- `Resource` finalizers run in reverse allocation order
+- Dependency groups can share a lifecycle or manage their own
+- No macros, annotations, reflection-based discovery, or code generation
 
-The suggested approach with this library is to:
+cedi is deliberately small. It is an application-wiring tool, not a framework that owns your application.
 
-1. Define a `Dependencies` class that holds all the dependencies.
-2. Instantiate an `Allocator` and pass it as a parameter to the `Dependencies` object. The `Allocator` is responsible
-   for managing the lifecycle of resources and ensures that they are shut down in the right order.
-3. Use a `provide` method to instantiate dependencies that return a `Resource[F, A]` or `F[A]`. The method ensures that the
-   resources are properly managed and shut down when the application finishes.
-4. Use `lazy val` to instantiate dependencies only once and only when they are accessed (if you need to instantiate
-   dependencies multiple times, use `def` instead of `lazy val`).
-5. Wrap the `Dependencies` object in a `Resource` so that resources are shut down automatically when the
-   application finishes.
-6. Use the `Dependencies` object in your main class, that extends `IOApp` trait.
+## Why cedi?
 
-Usage example:
+A small Cats Effect dependency graph is usually easy to express directly:
 
 ```scala
-import cats.effect.{IO, Resource}
-import me.ivovk.cedi.syntax.* // Import necessary packages
+def application: Resource[IO, UserService] =
+  for
+    database   <- Database.connect
+    repository = new UserRepository(database)
+    service    = new UserService(repository)
+  yield service
+```
 
-// create a Dependencies object and class that holds all the dependencies:
-object Dependencies {
-  def create(): Resource[IO, Dependencies] =
-    Allocator.create[IO]().map(Dependencies(using _))
-}
+As the graph grows, this composition root can become a long, order-sensitive list. Splitting it into modules often means
+passing many dependencies between `Resource` constructors.
 
-class Dependencies(using AllocatorIO) {
-  // Suppose you need to instantiate a class, method constructor of which returns a Resource[F, A]
-  // Then use the `provide` method to allocate such resources:
-  lazy val http4sClient: Client[IO] = provide {
-    // `build` method returns a Resource[IO, Client[IO]]
-    EmberClientBuilder.default[IO].build
-  }
+With cedi, the graph is expressed as normal Scala object composition:
 
-  // Dependencies that don't need to be shut down can be used directly
-  lazy val myClass: MyClass = new MyClass(http4sClient)
-
-  // It also supports dependencies that return an IO[A] or any other F[A]
-  lazy val myDependency: MyDependency = provide {
-    IO(new MyDependency(http4sClient))
-  }
-
-  // Dependencies will be shut down in the right order, so if myDependency depends on http4sClient,
-  // http4sClient will be shut down after myDependency
-  lazy val myServer: Resource[IO, Server[IO]] = {
-    EmberServerBuilder.default[IO]
-      .withHost(host"0.0.0.0")
-      .withPort(port"8080")
-      .withHttpApp(myDependency.app)
-      .build
-  }
-
-}
-
-// Use your dependencies in the main app class
-object Main extends IOApp.Simple {
-  override def run: IO[Unit] =
-    Dependencies.create().use { deps =>
-      // use your main dependency here
-      deps.myServer.useForever
-    }
+```scala
+final class Dependencies(using AllocatorIO) {
+  lazy val database: Database = provide(Database.connect)
+  lazy val repository: UserRepository = new UserRepository(database)
+  lazy val users: UserService = new UserService(repository)
 }
 ```
 
+Resources remain lazy and lifecycle-managed, but consumers receive ordinary values rather than `Resource` wrappers.
+
 ## Installation
 
-![Maven Central](https://img.shields.io/maven-central/v/me.ivovk/cedi_3?style=flat-square&color=green)
-
-Supported Scala versions: `>= 3.3.x`
-
-To install, add the following to your `build.sbt`:
+cedi supports Scala `>= 3.3.x`.
 
 ```scala
-libraryDependencies ++= Seq(
-  "me.ivovk" %% "cedi" % "{version}",
-)
+libraryDependencies += "me.ivovk" %% "cedi" % "0.2.4"
+```
+
+## Quick start
+
+This complete example uses small placeholder database and service implementations:
+
+```scala
+import cats.effect.{IO, IOApp, Resource}
+import me.ivovk.cedi.syntax.*
+
+final class Database
+
+object Database {
+  def connect: Resource[IO, Database] =
+    Resource.make(IO(new Database))(_ => IO.println("Closing database"))
+}
+
+final class UserRepository(database: Database)
+
+final class UserService(repository: UserRepository) {
+  def run: IO[Unit] = IO.println("Running application")
+}
+
+object Dependencies {
+  def create: Resource[IO, Dependencies] =
+    Allocator.create[IO]().map(Dependencies(using _))
+}
+
+final class Dependencies(using AllocatorIO) {
+  // Resource[IO, Database] is allocated on first access. Its finalizer is
+  // registered with the Allocator.
+  lazy val database: Database = provide(Database.connect)
+
+  // Plain dependencies are constructed normally.
+  lazy val repository: UserRepository = new UserRepository(database)
+  lazy val users: UserService = new UserService(repository)
+}
+
+object Main extends IOApp.Simple {
+  override def run: IO[Unit] =
+    Dependencies.create.use(_.users.run)
+}
+```
+
+When `Dependencies.create.use` finishes, the allocator releases every resource that was initialized. Resources that were
+never accessed are never acquired.
+
+`provide` also accepts an `F[A]`:
+
+```scala
+lazy val config: Config = provide(loadConfig[IO])
+```
+
+`provide`, `allocate`, and `cedi` are equivalent names, so you can use whichever reads best in your dependency object.
+
+## How it works
+
+`Allocator.create[F]()` returns a `Resource[F, Allocator[F]]`. A call to `provide`:
+
+1. Runs the supplied `Resource[F, A]` or `F[A]`
+2. Returns the acquired `A` as a plain value
+3. Registers the `Resource` finalizer with the allocator (`F[A]` has a no-op release)
+
+Finalizers are registered in last-in, first-out order. If dependency `B` accesses dependency `A` while it is being
+initialized, `B` is released before `A`.
+
+Scala's `lazy val` supplies the initialize-once behavior. Using `def` instead allocates a new instance on every call, with
+each finalizer still registered for shutdown.
+
+### The deliberate trade-off
+
+`provide` acquires a dependency synchronously when the expression is evaluated so it can return a plain `A`. This makes
+the composition root concise, but it also means acquisition failures surface while that value is being initialized.
+
+Use cedi for long-lived application dependencies at the composition boundary. Keep short-lived, request-scoped, or
+business-logic resources explicit as `Resource` or `F`.
+
+## Modular dependency graphs
+
+Dependency groups can share one allocator. This gives the whole graph one lifecycle and is the simplest option in most
+applications:
+
+```scala
+final class PersistenceDependencies(using AllocatorIO) {
+  lazy val database: Database = provide(Database.connect)
+}
+
+final class Dependencies(using AllocatorIO) {
+  val persistence = new PersistenceDependencies
+
+  lazy val repository: UserRepository =
+    new UserRepository(persistence.database)
+  lazy val users: UserService =
+    new UserService(repository)
+}
+```
+
+A module can also own a separate allocator. Allocate the module itself with `provide` so its entire lifecycle is nested
+inside its parent:
+
+```scala
+object PersistenceDependencies {
+  def create: Resource[IO, PersistenceDependencies] =
+    Allocator.create[IO]().map(PersistenceDependencies(using _))
+}
+
+final class PersistenceDependencies(using AllocatorIO) {
+  lazy val database: Database = provide(Database.connect)
+}
+
+final class Dependencies(using AllocatorIO) {
+  lazy val persistence: PersistenceDependencies =
+    provide(PersistenceDependencies.create)
+
+  lazy val repository: UserRepository =
+    new UserRepository(persistence.database)
+  lazy val users: UserService =
+    new UserService(repository)
+}
 ```
 
 ## Debugging allocation order
 
-If you want to see the order of initialization and finalization of resources, use `LoggingAllocationListener` when
-creating an `Allocator` object. This will log the allocation and finalization of resources in the order they happen:
+Attach a `LoggingAllocationListener` to log resources as they are initialized and released:
 
 ```scala
+import cats.effect.{IO, Resource}
 import me.ivovk.cedi.{Allocator, LoggingAllocationListener}
 
-Allocator.create[IO]().withListener(new LoggingAllocationListener[IO])
+val allocator: Resource[IO, Allocator[IO]] =
+  Allocator
+    .create[IO]()
+    .map(_.withListener(new LoggingAllocationListener[IO]))
 ```
 
-## Modularization
+## Background
 
-You can have multiple dependencies objects and combine them together. In this case, you can either reuse the same
-`Allocator` object or create a new one for each dependency object, but wrap their instantiation
-in `provide { ... }` so that they are shut down in the right order:
-
-Example reusing the same `Allocator` object:
-
-```scala
-import me.ivovk.cedi.syntax.*
-
-// AWS - specific dependencies
-class AwsDependencies(using AllocatorIO) {
-  lazy val s3Client: S3Client = provide {
-    S3ClientBuilder.default.build
-  }
-}
-
-// Main application dependencies
-object Dependencies {
-  def create(): Resource[IO, Dependencies] =
-    Allocator.create[IO]().map(Dependencies(using _))
-}
-
-class Dependencies(using AllocatorIO) {
-  val aws = new AwsDependencies
-
-  lazy val http4sClient: Client[IO] = provide {
-    EmberClientBuilder.default[IO].build
-  }
-}
-
-object App extends IOApp.Simple {
-  override def run: IO[Unit] = Dependencies.create().use { deps =>
-    // use aws.s3Client here
-    deps.aws.s3Client
-  }
-}
-```
-
-Example creating a new `Allocator` object for each `Dependencies` object:
-
-```scala
-import me.ivovk.cedi.syntax.*
-
-// AWS - specific dependencies
-object AwsDependencies {
-  def create(): Resource[IO, AwsDependencies] =
-    Allocator.create[IO]().map(AwsDependencies(using _))
-}
-
-class AwsDependencies(using AllocatorIO) {
-  lazy val s3Client: S3Client = provide {
-    S3ClientBuilder.default.build
-  }
-}
-
-// Main application dependencies
-object Dependencies {
-  def create(): Resource[IO, Dependencies] =
-    Allocator.create[IO]().map(new Dependencies(using _))
-}
-
-class Dependencies(using AllocatorIO) {
-  lazy val aws = provide {
-    AwsDependencies.create()
-  }
-
-  lazy val http4sClient: Client[IO] = provide {
-    EmberClientBuilder.default[IO].build
-  }
-}
-
-object App extends IOApp.Simple {
-  override def run: IO[Unit] = Dependencies.create().use { deps =>
-    // use aws.s3Client here
-    deps.aws.s3Client
-  }
-}
-```
+cedi grew out of the article
+[Dependency Injection with Cats Effect Resource Monad](https://medium.com/@ivovk/dependency-injection-with-cats-effect-resource-monad-ad7cd47b977).
