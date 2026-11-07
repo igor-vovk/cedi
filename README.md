@@ -75,7 +75,7 @@ final class UserService(repository: UserRepository) {
 
 object Dependencies {
   def create: Resource[IO, Dependencies] =
-    Allocator.create[IO]().map(Dependencies(using _))
+    Allocator.newBuilder[IO].create(Dependencies())
 }
 
 final class Dependencies(using AllocatorIO) {
@@ -107,7 +107,8 @@ lazy val config: Config = provide(loadConfig[IO])
 
 ## How it works
 
-`Allocator.create[F]()` returns a `Resource[F, Allocator[F]]`. A call to `provide`:
+`Allocator.newBuilder[F].create(Dependencies())` returns a `Resource[F, Dependencies]`. Calling `create()` without a
+constructor returns a `Resource[F, Allocator[F]]` when you need to use the allocator directly. A call to `provide`:
 
 1. Runs the supplied `Resource[F, A]` or `F[A]`
 2. Returns the acquired `A` as a plain value
@@ -153,7 +154,7 @@ inside its parent:
 ```scala
 object PersistenceDependencies {
   def create: Resource[IO, PersistenceDependencies] =
-    Allocator.create[IO]().map(PersistenceDependencies(using _))
+    Allocator.newBuilder[IO].create(PersistenceDependencies())
 }
 
 final class PersistenceDependencies(using AllocatorIO) {
@@ -179,10 +180,10 @@ Attach a `LoggingAllocationListener` to log resources as they are initialized an
 import cats.effect.{IO, Resource}
 import me.ivovk.cedi.{Allocator, LoggingAllocationListener}
 
-val allocator: Resource[IO, Allocator[IO]] =
-  Allocator
-    .create[IO]()
-    .map(_.withListener(new LoggingAllocationListener[IO]))
+val dependencies: Resource[IO, Dependencies] =
+  Allocator.newBuilder[IO]
+    .withListener(new LoggingAllocationListener[IO])
+    .create(Dependencies())
 ```
 
 ## Background
