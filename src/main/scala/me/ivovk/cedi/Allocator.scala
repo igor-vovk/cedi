@@ -9,7 +9,7 @@ import scala.reflect.ClassTag
 
 object Allocator {
 
-  def newBuilder[F[_]: Async]: AllocatorBuilder[F] =
+  def builder[F[_]: Async]: AllocatorBuilder[F] =
     new AllocatorBuilder(
       listener = NoOpListener[F]
     )

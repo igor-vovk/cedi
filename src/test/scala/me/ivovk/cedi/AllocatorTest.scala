@@ -28,7 +28,7 @@ class AllocatorTest extends AnyFlatSpec {
       def create(): (Resource[IO, TestDependencies], CapturingAllocationListener) = {
         val listener = new CapturingAllocationListener
 
-        val deps = Allocator.newBuilder[IO]
+        val deps = Allocator.builder[IO]
           .withListener(listener)
           .create(TestDependencies())
 
@@ -65,7 +65,7 @@ class AllocatorTest extends AnyFlatSpec {
   }
 
   it should "create a dependencies object" in new ctx {
-    val testDependencies = Allocator.newBuilder[IO].create(TestDependencies())
+    val testDependencies = Allocator.builder[IO].create(TestDependencies())
 
     val testResource = testDependencies
       .use(deps => IO.pure(deps.testResourceA))
@@ -76,7 +76,7 @@ class AllocatorTest extends AnyFlatSpec {
 
   it should "create a configured allocator with a builder" in new ctx {
     val listener  = new CapturingAllocationListener
-    val allocator = Allocator.newBuilder[IO]
+    val allocator = Allocator.builder[IO]
       .withListener(listener)
       .create()
 
