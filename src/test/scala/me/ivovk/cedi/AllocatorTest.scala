@@ -27,9 +27,10 @@ class AllocatorTest extends AnyFlatSpec {
     object TestDependencies {
       def create(): (Resource[IO, TestDependencies], CapturingAllocationListener) = {
         val listener = new CapturingAllocationListener
-        val deps     = Allocator.create[IO]()
-          .map(_.withListener(listener))
-          .map(TestDependencies(using _))
+
+        val deps = Allocator.builder[IO]
+          .withListener(listener)
+          .create(TestDependencies())
 
         (deps, listener)
       }
@@ -61,6 +62,30 @@ class AllocatorTest extends AnyFlatSpec {
 
     assert(listener.allocations == Seq("resourceA"))
     assert(listener.shutdowns == Seq("resourceA"))
+  }
+
+  it should "create a dependencies object" in new ctx {
+    val testDependencies = Allocator.builder[IO].create(TestDependencies())
+
+    val testResource = testDependencies
+      .use(deps => IO.pure(deps.testResourceA))
+      .unsafeRunSync()
+
+    assert(testResource == "resourceA")
+  }
+
+  it should "create a configured allocator with a builder" in new ctx {
+    val listener  = new CapturingAllocationListener
+    val allocator = Allocator.builder[IO]
+      .withListener(listener)
+      .create()
+
+    allocator
+      .use(allocator => IO.pure(allocator.allocate(Resource.pure("resource"))))
+      .unsafeRunSync()
+
+    assert(listener.allocations == Seq("resource"))
+    assert(listener.shutdowns == Seq("resource"))
   }
 
   it should "allocate resources in the correct order" in new ctx {

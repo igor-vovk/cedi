@@ -49,7 +49,7 @@ Resources remain lazy and lifecycle-managed, but consumers receive ordinary valu
 cedi supports Scala `>= 3.3.x`.
 
 ```scala
-libraryDependencies += "me.ivovk" %% "cedi" % "0.2.4"
+libraryDependencies += "me.ivovk" %% "cedi" % "0.3.0"
 ```
 
 ## Quick start
@@ -60,25 +60,25 @@ This complete example uses small placeholder database and service implementation
 import cats.effect.{IO, IOApp, Resource}
 import me.ivovk.cedi.syntax.*
 
-final class Database
+class Database(...) { ... }
 
 object Database {
   def connect: Resource[IO, Database] =
     Resource.make(IO(new Database))(_ => IO.println("Closing database"))
 }
 
-final class UserRepository(database: Database)
+class UserRepository(database: Database)
 
-final class UserService(repository: UserRepository) {
+class UserService(repository: UserRepository) {
   def run: IO[Unit] = IO.println("Running application")
 }
 
 object Dependencies {
   def create: Resource[IO, Dependencies] =
-    Allocator.create[IO]().map(Dependencies(using _))
+    Allocator.builder[IO].create(Dependencies())
 }
 
-final class Dependencies(using AllocatorIO) {
+class Dependencies(using AllocatorIO) {
   // Resource[IO, Database] is allocated on first access. Its finalizer is
   // registered with the Allocator.
   lazy val database: Database = provide(Database.connect)
@@ -107,7 +107,8 @@ lazy val config: Config = provide(loadConfig[IO])
 
 ## How it works
 
-`Allocator.create[F]()` returns a `Resource[F, Allocator[F]]`. A call to `provide`:
+`Allocator.builder[F].create(Dependencies())` returns a `Resource[F, Dependencies]`. Calling `create()` without a
+constructor returns a `Resource[F, Allocator[F]]` when you need to use the allocator directly. A call to `provide`:
 
 1. Runs the supplied `Resource[F, A]` or `F[A]`
 2. Returns the acquired `A` as a plain value
@@ -153,7 +154,7 @@ inside its parent:
 ```scala
 object PersistenceDependencies {
   def create: Resource[IO, PersistenceDependencies] =
-    Allocator.create[IO]().map(PersistenceDependencies(using _))
+    Allocator.builder[IO].create(PersistenceDependencies())
 }
 
 final class PersistenceDependencies(using AllocatorIO) {
@@ -179,10 +180,10 @@ Attach a `LoggingAllocationListener` to log resources as they are initialized an
 import cats.effect.{IO, Resource}
 import me.ivovk.cedi.{Allocator, LoggingAllocationListener}
 
-val allocator: Resource[IO, Allocator[IO]] =
-  Allocator
-    .create[IO]()
-    .map(_.withListener(new LoggingAllocationListener[IO]))
+val dependencies: Resource[IO, Dependencies] =
+  Allocator.builder[IO]
+    .withListener(new LoggingAllocationListener[IO])
+    .create(Dependencies())
 ```
 
 ## Background
