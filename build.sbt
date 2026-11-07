@@ -4,14 +4,14 @@ ThisBuild / scalaVersion := "3.3.9"
 
 ThisBuild / organization := "me.ivovk"
 
-ThisBuild / homepage   := Some(url("https://github.com/igor-vovk/cedi"))
-ThisBuild / licenses   := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0"))
+ThisBuild / homepage   := Some(uri("https://github.com/igor-vovk/cedi"))
+ThisBuild / licenses   := List("Apache-2.0" -> uri("http://www.apache.org/licenses/LICENSE-2.0"))
 ThisBuild / developers := List(
   Developer(
     "igor-vovk",
     "Ihor Vovk",
     "ideals-03.gushing@icloud.com",
-    url("https://ivovk.me"),
+    uri("https://ivovk.me"),
   )
 )
 
@@ -37,7 +37,7 @@ lazy val cedi = (project in file("."))
     ),
   )
 
-lazy val root = (project)
+lazy val root = project
   .aggregate(
     cedi
   )
